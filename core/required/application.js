@@ -8,6 +8,7 @@ module.exports = (function() {
   const Authorizer = require('./authorizer.js');
   const ExecutionQueue = require('./execution_queue.js');
   const Scheduler = require('./scheduler.js');
+  const EndpointRequest = require('./endpoint_request.js');
 
   const dummyRouter = require('./dummy_router.js');
 
@@ -69,7 +70,12 @@ module.exports = (function() {
       this.scheduler = null;
 
       this.middleware = new ExecutionQueue();
+      this.renderware = new ExecutionQueue();
       this.initializers = new ExecutionQueue();
+
+      // Load all models for relationship dependencies
+      fs.existsSync('./app/models') &&
+        fs.readdirSync('./app/models').forEach(m => require(`${process.cwd()}/app/models/${m}`));
 
     }
 
@@ -320,6 +326,18 @@ module.exports = (function() {
     }
 
     /**
+    * Creates a new MockRequest object (emulates an HTTP request)
+    * @param {string} path The path you wish to hit
+    * @param {Object} query The query parameters you wish to pass
+    * @return {Nodal.EndpointRequest}
+    */
+    endpoint(path, query) {
+
+      return new EndpointRequest(this, path, query);
+
+    }
+
+    /**
     * Set default key-value pair for data objects to be sent to templates. i.e. "api_url" if you need it accessible from every template.
     * @param {string} name Key which you're setting for the data object
     * @param {any} value Value which you're setting for the specified key
@@ -339,13 +357,12 @@ module.exports = (function() {
     }
 
     /**
-    * Retrieves the template matching the provided name. Lazy loads new templates from disk, otherwise caches.
-    * @param {string} name The template name (full path in the the app/templates directory).
+    * Retrieves the template from the cache or loads the template and caches it
+    * @param {string} The template name (full path in the the app/templates directory).
     * @param {optional boolean} raw Whether or not the template is "raw" (i.e. just an HTML string, no template engine required.) Defaults to false.
     * @return {Nodal.Template} The template instance
     */
-    template(name, raw) {
-
+    getTemplate(name, raw) {
       raw = !!raw | 0; // coerce to 0, 1
 
       if (!this._templates[name]) {
@@ -361,13 +378,41 @@ module.exports = (function() {
       try {
 
         let contents = fs.readFileSync(filename);
-        this._templates[name][raw] = new Template(
-          this,
-          raw ?
-            function() { return contents; } :
-            dot.template(contents)
-        );
+
+        this._templates[name][raw] = raw ? contents : dot.template(contents);
+
         return this._templates[name][raw];
+
+      } catch(e) {
+
+        console.log(e);
+        console.log('Could not load template ' + name);
+
+      }
+
+      return this._templates['!'];
+    }
+
+    /**
+    * Retrieves the template matching the provided name. Lazy loads new templates from disk, otherwise caches.
+    * @param {string} templates List of heirarchy of templates (each a full path in the the app/templates directory).
+    * @return {Nodal.Template} The template instance
+    */
+    template() {
+
+      let templates = Array.prototype.slice.call(arguments)
+
+      try {
+        // Loop the template hierarchy, and return the first templates contents
+        let templateContents = templates.map((name) => {
+          return this.getTemplate(name, false);
+        })[0];
+
+        return new Template(
+          this,
+          templateContents,
+          templates.slice(1).join(',')
+        );
 
       } catch(e) {
 
@@ -379,6 +424,34 @@ module.exports = (function() {
       return this._templates['!'];
 
     }
+
+    /**
+    * Retrieves a "raw" template (i.e. just an HTML string, no template engine required.)
+    * @param {string} name The traw emplate name (full path in the the app/templates directory).
+    * @return {Nodal.Template} The template instance
+    */
+    rawTemplate(name) {
+
+      let contents = this.getTemplate(name, true);
+
+      try {
+
+        return new Template(
+          this,
+          function() { return contents; }
+        );
+
+      } catch(e) {
+
+        console.log(e);
+        console.log('Could not load raw template ' + name);
+
+      }
+
+      return this._templates['!'];
+
+    }
+
 
     /**
     * Handles incoming http.ClientRequest and outgoing http.ServerResponse objects, routes them appropriately.

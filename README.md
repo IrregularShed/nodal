@@ -1,11 +1,11 @@
 # Nodal
 ## Web Servers Made Easy With Node.js
 
-[![Join the chat at https://gitter.im/keithwhor/nodal](https://badges.gitter.im/keithwhor/nodal.svg)](https://gitter.im/keithwhor/nodal?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+[![Build Status](https://travis-ci.org/keithwhor/nodal.svg?branch=master)](https://travis-ci.org/keithwhor/nodal) [![Join the chat at https://gitter.im/keithwhor/nodal](https://badges.gitter.im/keithwhor/nodal.svg)](https://gitter.im/keithwhor/nodal?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 ![Nodal Logo](./nodal.png)
 
-[![Build Status](https://travis-ci.org/keithwhor/nodal.svg?branch=master)](https://travis-ci.org/keithwhor/nodal)
+View the website at [nodaljs.com](http://nodaljs.com).
 
 Nodal is a web server for Node.js that was built with the sole purpose of making
 the developer's life easier.
@@ -44,7 +44,8 @@ wherever you please.
 Getting started with Nodal is easy.
 
 1. Download and install the newest Node 5.x version from [nodejs.org](https://nodejs.org)
-2. Open terminal, and type `sudo npm install nodal -g`.
+2. Open terminal, and type `npm install nodal -g`.
+(If you get an error, run `sudo npm install nodal -g` or fix permissions permanently by <a href="https://docs.npmjs.com/getting-started/fixing-npm-permissions" target="_blank">following these directions</a>)
 3. Using your terminal, visit your projects folder. Perhaps with `cd ~`.
 4. Run `nodal new`.
 5. Follow the on screen instructions, enter your new project directory and type `nodal s`.
@@ -198,9 +199,11 @@ You'll be able to learn more about Nodal at [nodaljs.com](http://nodaljs.com).
 
 ## Documentation
 
-Nodal has the majority of its important methods fully documented inline, in the
-codebase. You will be able to find this translated and prettified at
-[nodaljs.com](http://nodaljs.com).
+Check out the website at [nodaljs.com](http://nodaljs.com).
+
+## Roadmap
+
+View the roadmap at [ROADMAP.md](./ROADMAP.md).
 
 ## About
 

@@ -15,7 +15,8 @@ module.exports = (function(Nodal) {
       columns: [
         {name: 'id', type: 'serial'},
         {name: 'name', type: 'string'},
-        {name: 'created_at', type: 'datetime'}
+        {name: 'created_at', type: 'datetime'},
+        {name: 'updated_at', type: 'datetime'}
       ]
     };
 
@@ -25,7 +26,8 @@ module.exports = (function(Nodal) {
         {name: 'id', type: 'serial'},
         {name: 'from_parent_id', type: 'int'},
         {name: 'to_parent_id', type: 'int'},
-        {name: 'created_at', type: 'datetime'}
+        {name: 'created_at', type: 'datetime'},
+        {name: 'updated_at', type: 'datetime'}
       ]
     };
 
@@ -36,7 +38,8 @@ module.exports = (function(Nodal) {
         {name: 'parent_id', type: 'int'},
         {name: 'name', type: 'string'},
         {name: 'age', type: 'int'},
-        {name: 'created_at', type: 'datetime'}
+        {name: 'created_at', type: 'datetime'},
+        {name: 'updated_at', type: 'datetime'}
       ]
     };
 
@@ -47,7 +50,8 @@ module.exports = (function(Nodal) {
         {name: 'parent_id', type: 'int'},
         {name: 'name', type: 'string'},
         {name: 'job', type: 'string'},
-        {name: 'created_at', type: 'datetime'}
+        {name: 'created_at', type: 'datetime'},
+        {name: 'updated_at', type: 'datetime'}
       ]
     };
 
@@ -58,7 +62,8 @@ module.exports = (function(Nodal) {
         {name: 'parent_id', type: 'int'},
         {name: 'name', type: 'string'},
         {name: 'animal', type: 'string'},
-        {name: 'created_at', type: 'datetime'}
+        {name: 'created_at', type: 'datetime'},
+        {name: 'updated_at', type: 'datetime'}
       ]
     };
 
@@ -124,24 +129,26 @@ module.exports = (function(Nodal) {
 
           parents.forEach((p, i) => {
 
+            let id = i + 1;
+
             let children = 'ABCDEFGHIJ'.split('').map(name => {
-              return new Child({name: `Child${name}`, age: (Math.random() * 30) | 0});
+              return new Child({parent_id: id, name: `Child${name}`, age: (Math.random() * 30) | 0});
             });
 
             p.set('children', Nodal.ModelArray.from(children));
 
             let pets = ['Oliver', 'Ruby', 'Pascal'].map((name, i) => {
-              return new Pet({name: name, animal: ['Cat', 'Dog', 'Cat'][i]});
+              return new Pet({parent_id: id, name: name, animal: ['Cat', 'Dog', 'Cat'][i]});
             });
 
             p.set('pets', Nodal.ModelArray.from(pets));
 
-            let partner = new Partner({name: `Partner${i}`, job: ['Plumber', 'Engineer', 'Nurse'][(Math.random() * 3) | 0]});
+            let partner = new Partner({parent_id: id, name: `Partner${i}`, job: ['Plumber', 'Engineer', 'Nurse'][(Math.random() * 3) | 0]});
             p.set('partner', partner);
 
             let friendships = new Nodal.ModelArray(Friendship);
             while (i--) {
-              let friendship = new Friendship({to_parent_id: i + 1});
+              let friendship = new Friendship({from_parent_id: id, to_parent_id: i + 1});
               friendships.push(friendship);
             }
 
@@ -317,6 +324,35 @@ module.exports = (function(Nodal) {
           expect(children).to.be.an.instanceOf(Nodal.ModelArray);
           expect(children.length).to.equal(10);
           expect(children[0].get('id')).to.equal(11);
+          done();
+
+        });
+
+    });
+
+    it('Should first properly', function(done) {
+
+      Parent.query()
+        .orderBy('id', 'ASC')
+        .first((err, parent) => {
+
+          expect(err).to.equal(null);
+          expect(parent).to.exist;
+          expect(parent.get('id')).to.equal(1);
+          done();
+
+        });
+
+    });
+
+    it('Should give error on first if nothing found', function(done) {
+
+      Parent.query()
+        .where({name: 'Spongebob'})
+        .first((err, parent) => {
+
+          expect(err).to.exist;
+          expect(parent).to.not.exist;
           done();
 
         });
@@ -735,6 +771,144 @@ module.exports = (function(Nodal) {
           done();
 
         });
+
+    });
+
+    it('Should update all parents names', (done) => {
+
+      Parent.query()
+        .update({name: 'Dave'}, (err, parents) => {
+
+          expect(parents.length).to.equal(10);
+
+          parents.forEach(parent => {
+            expect(parent.get('name')).to.equal('Dave');
+          });
+
+          done();
+
+        });
+
+    });
+
+    it('Should update all parents names and join children', (done) => {
+
+      Parent.query()
+        .join('children')
+        .update({name: 'Bertrand'}, (err, parents) => {
+
+          expect(parents.length).to.equal(10);
+
+          parents.forEach(parent => {
+            expect(parent.get('children').length).to.equal(10);
+            expect(parent.get('name')).to.equal('Bertrand');
+          });
+
+          done();
+
+        });
+
+    });
+
+    it('Should update all parents names and join children, and order by id DESC', (done) => {
+
+      Parent.query()
+        .join('children')
+        .orderBy('id', 'DESC')
+        .update({name: 'Bertrand'}, (err, parents) => {
+
+          expect(parents.length).to.equal(10);
+
+          parents.forEach((parent, i) => {
+            expect(parent.get('children').length).to.equal(10);
+            expect(parent.get('name')).to.equal('Bertrand');
+            expect(parent.get('id')).to.equal(10 - i);
+          });
+
+          done();
+
+        });
+
+    });
+
+    it('Should join children to pets', done => {
+
+      Pet.query()
+        .join('children')
+        .first((err, pet) => {
+
+          expect(err).to.not.exist;
+          expect(pet).to.exist;
+          expect(pet.get('children')).to.exist;
+          expect(pet.get('children').length).to.equal(10);
+          done();
+
+        });
+
+    });
+
+    it('Should join pets to children', done => {
+
+      Child.query()
+        .join('pets')
+        .first((err, child) => {
+
+          expect(err).to.not.exist;
+          expect(child).to.exist;
+          expect(child.get('pets')).to.exist;
+          expect(child.get('pets').length).to.equal(3);
+          done();
+
+        });
+
+    });
+
+    it('Should join parent and children to pets', done => {
+
+      Pet.query()
+        .join('parent')
+        .join('children')
+        .first((err, pet) => {
+
+          expect(err).to.not.exist;
+          expect(pet).to.exist;
+          expect(pet.get('children')).to.exist;
+          expect(pet.get('children').length).to.equal(10);
+          expect(pet.get('parent')).to.exist;
+          done();
+
+        });
+
+    });
+
+    it('Should query pet by children', done => {
+
+      Pet.query()
+        .where({children__id__lte: 50})
+        .end((err, pets) => {
+
+          expect(err).to.not.exist;
+          expect(pets).to.exist;
+          expect(pets.length).to.equal(15);
+          done();
+
+        });
+
+    });
+
+    it('Should do a destroy cascade', (done) => {
+
+      Parent.query()
+        .end((err, parents) => {
+
+          parents.destroyCascade(err => {
+
+            expect(err).to.not.exist;
+            done();
+
+          });
+
+        })
 
     });
 

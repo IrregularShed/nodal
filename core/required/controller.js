@@ -34,6 +34,24 @@ module.exports = (function() {
     }
 
     /**
+    * Run the given method
+    * @private
+    */
+    __run__(method) {
+
+      this.app.middleware.exec(this, (err) => {
+
+        if (err) {
+          return this.error(err);
+        }
+
+        this[method](this, this.params, this.app);
+
+      });
+
+    }
+
+    /**
     * Specifies CORS (cross origin resource sharing) headers.
     * @param {string} value Use '*' for a generic API service that accepts requests from anywhere, otherwise specific a domain.
     * @return {this}
@@ -239,9 +257,10 @@ module.exports = (function() {
     * Using API formatting, generate an error or respond with model / object data.
     * @param {Error|Object|Array|Nodal.Model|Nodal.ModelArray} data Object to be formatted for API response
     * @param {optional Array} The interface to use for the data being returned, if not an error.
+    * @param {Object} options Options object to send to Model#toObject
     * @return {boolean}
     */
-    respond(data, arrInterface, useResource) {
+    respond(data, arrInterface, options) {
 
       if (data instanceof Error) {
 
@@ -253,7 +272,7 @@ module.exports = (function() {
 
       }
 
-      this.render(API.format(data, arrInterface, useResource));
+      this.render(API.format(data, arrInterface, options));
       return true;
 
     }
@@ -291,7 +310,7 @@ module.exports = (function() {
       this.getStatus() || this.status(200);
       this.getHeader('X-Powered-By') || this.setHeader('X-Powered-By', 'Nodal');
 
-      this.app.middleware.exec(this, data, (e, data) => {
+      this.app.renderware.exec(this, data, (e, data) => {
 
         if (e) {
           this.setHeader('Content-Type', 'text/plain');

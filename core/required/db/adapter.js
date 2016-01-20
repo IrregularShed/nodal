@@ -34,6 +34,9 @@ module.exports = (function() {
     generateCreateIndex(table, columnName, indexType) {}
     generateDropIndex(table, columnName) {}
 
+    generateSimpleForeignKeyQuery(table, referenceTable) {}
+    generateDropSimpleForeignKeyQuery(table, referenceTable) {}
+
     sanitize(type, value) {
 
       let fnSanitize = this.sanitizeType[type];
@@ -159,6 +162,12 @@ module.exports = (function() {
 
       let formatTableField = (table, column) => `${this.escapeField(table)}.${this.escapeField(column)}`;
 
+      if (typeof subQuery === 'object' && subQuery !== null) {
+        subQuery = this.escapeField(subQuery.table);
+      } else {
+        subQuery = subQuery ? `(${subQuery})` : table;
+      }
+
       return [
         'SELECT ',
           columns.map(field => {
@@ -168,7 +177,8 @@ module.exports = (function() {
             return `(${formatTableField(field.name || field.table || table, field.columnName)}) AS ${this.escapeField(field.alias)}`;
           }).join(','),
         ' FROM ',
-          subQuery ? `(${subQuery}) AS ` : '',
+          subQuery,
+          ' AS ',
           this.escapeField(table),
           this.generateJoinClause(table, joinArray),
           this.generateWhereClause(table, multiFilter, paramOffset),
@@ -222,6 +232,41 @@ module.exports = (function() {
         ') RETURNING *'
       ].join('');
 
+    }
+
+    generateDeleteAllQuery(table, columnName, values, joins) {
+
+      let subQuery;
+
+      if (!joins) {
+
+        subQuery = `${values.map((v, i) => '\$' + (i + 1))}`;
+
+      } else {
+
+        subQuery = [
+          `SELECT ${this.escapeField(table)}.${this.escapeField(columnName)} FROM ${this.escapeField(table)}`
+        ];
+
+        subQuery = subQuery.concat(
+          joins.slice().reverse().map((j, i) => {
+            return [
+              `INNER JOIN ${this.escapeField(j.prevTable)} ON `,
+              `${this.escapeField(j.prevTable)}.${this.escapeField(j.prevColumn)} = `,
+              `${this.escapeField(j.joinTable)}.${this.escapeField(j.joinColumn)}`,
+              i === joins.length - 1 ?
+                ` AND ${this.escapeField(j.prevTable)}.${this.escapeField(j.prevColumn)} IN (${values.map((v, i) => '\$' + (i + 1))})` : ''
+            ].join('')
+          })
+        ).join(' ');
+
+      }
+
+      return [
+        `DELETE FROM ${this.escapeField(table)}`,
+        `WHERE ${this.escapeField(table)}.${this.escapeField(columnName)}`,
+        `IN (${subQuery})`
+      ].join(' ');
     }
 
     generateInsertQuery(table, columnNames) {
@@ -319,8 +364,7 @@ module.exports = (function() {
           value: where.value,
           ignoreValue: !!this.comparatorIgnoresValue[where.comparator],
           joined: where.joined,
-          via: where.via,
-          child: where.child
+          joins: where.joins
         };
       });
 
@@ -383,8 +427,7 @@ module.exports = (function() {
 
             joinedClauses.push({
               table: table,
-              via: whereObj.via,
-              child: whereObj.child,
+              joins: whereObj.joins,
               clauses: currentJoinedClauses
             });
 
@@ -398,17 +441,24 @@ module.exports = (function() {
 
       joinedClauses = joinedClauses.map(jc => {
 
-        jc.clauses.push(
-          jc.child ?
-          `${this.escapeField(jc.table)}.${this.escapeField(jc.via)} = ${this.escapeField(table)}.${this.escapeField('id')}` :
-          `${this.escapeField(table)}.${this.escapeField(jc.via)} = ${this.escapeField(jc.table)}.${this.escapeField('id')}`
-        );
-
         return [
           `(`,
             `SELECT ${this.escapeField(jc.table)}.${this.escapeField('id')} `,
             `FROM ${this.escapeField(jc.table)} `,
-            `WHERE (${jc.clauses.join(' AND ')}) `,
+            jc.joins.map((join, i) => {
+              return [
+                `INNER JOIN ${this.escapeField(join.joinTable)} AS ${this.escapeField(join.joinAlias)} ON `,
+                `${this.escapeField(join.joinAlias)}.${this.escapeField(join.joinColumn)} = `,
+                `${this.escapeField(join.prevTable || table)}.${this.escapeField(join.prevColumn)}`,
+                i === jc.joins.length - 1 ?
+                  [
+                    ` AND `,
+                    `${this.escapeField(join.joinAlias)}.${this.escapeField(join.joinColumn)} = `,
+                    `${this.escapeField(jc.table)}.${this.escapeField(join.joinColumn)} `,
+                    `AND (${jc.clauses.join(' AND ')}) `
+                  ].join('') : ''
+              ].join('')
+            }).join(' '),
             `LIMIT 1`,
           `) IS NOT NULL`
         ].join('');
@@ -437,27 +487,31 @@ module.exports = (function() {
     generateJoinClause(table, joinArray) {
 
       return (!joinArray || !joinArray.length) ? '' :
-        joinArray.map(join => {
+        joinArray.map(joinData => {
 
-          let fields = join.field instanceof Array ? join.field : [join.field]
-          let baseFields = join.baseField instanceof Array ? join.baseField : [join.baseField]
+          return joinData.map(join => {
 
-          let statements = [];
+            let joinColumns = join.joinColumn instanceof Array ? join.joinColumn : [join.joinColumn]
+            let prevColumns = join.prevColumn instanceof Array ? join.prevColumn : [join.prevColumn]
 
-          fields.forEach(field => {
-            baseFields.forEach(baseField => {
-              statements.push(
-                `${this.escapeField(join.name || join.table)}.${this.escapeField(field)} = ` +
-                `${this.escapeField(table)}.${this.escapeField(baseField)}`
-              );
+            let statements = [];
+
+            joinColumns.forEach(joinColumn => {
+              prevColumns.forEach(prevColumn => {
+                statements.push(
+                  `${this.escapeField(join.joinAlias)}.${this.escapeField(joinColumn)} = ` +
+                  `${this.escapeField(join.prevTable || table)}.${this.escapeField(prevColumn)}`
+                );
+              });
             });
-          });
 
-          return [
-            ` LEFT JOIN ${this.escapeField(join.table)}`,
-            `AS ${this.escapeField(join.name || join.table)}`,
-            `ON (${statements.join(' OR ')})`
-          ].join(' ');
+            return [
+              ` LEFT JOIN ${this.escapeField(join.joinTable)}`,
+              `AS ${this.escapeField(join.joinAlias)}`,
+              `ON (${statements.join(' OR ')})`
+            ].join(' ');
+
+          }).join('')
 
         }).join('');
 
@@ -562,6 +616,8 @@ module.exports = (function() {
   DatabaseAdapter.prototype.types = {};
   DatabaseAdapter.prototype.sanitizeType = {};
   DatabaseAdapter.prototype.escapeFieldCharacter = '';
+
+  DatabaseAdapter.prototype.supportsForeignKey = false;
 
   return DatabaseAdapter;
 

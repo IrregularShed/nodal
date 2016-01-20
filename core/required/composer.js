@@ -92,7 +92,7 @@ module.exports = (function() {
           let cachedForRow = curRowObjectCache[name][id];
 
           if (!cached) {
-            objectCache[name][id] = cached = new (this.Model.joinInformation(name).Model)(
+            objectCache[name][id] = cached = new (this.Model.relationship(name).getModel())(
               joinSingle[name].reduce((prev, key) => {
                 prev[key] = row[`\$${name}\$${key}`];
                 return prev;
@@ -110,7 +110,7 @@ module.exports = (function() {
 
         joinMultipleNames.forEach(name => {
 
-          let modelArray = model.get(name) || model.set(name, new ModelArray(this.Model.joinInformation(name).Model));
+          let modelArray = model.get(name) || model.set(name, new ModelArray(this.Model.relationship(name).getModel()));
 
           let id = row[`\$\$${name}\$id`];
           if (id === null) {
@@ -124,7 +124,7 @@ module.exports = (function() {
           let cachedForRow = curRowObjectCache[name][id];
 
           if (!cached) {
-            objectCache[name][id] = cached = new (this.Model.joinInformation(name).Model)(
+            objectCache[name][id] = cached = new (this.Model.relationship(name).getModel())(
               joinMultiple[name].reduce((prev, key) => {
                 prev[key] = row[`\$\$${name}\$${key}`];
                 return prev;
@@ -149,11 +149,11 @@ module.exports = (function() {
     }
 
     /**
-    * Generate query information from the linked list of previous queries. Can squash multiple composer commands into a single query.
+    * Collapses linked list of queries into an array (for .reduce, .map etc)
     * @private
-    * @return {Object}
+    * @return {Array}
     */
-    __generateQueryInformation__() {
+    __collapse__() {
 
       let composerArray = [];
       let composer = this;
@@ -162,6 +162,18 @@ module.exports = (function() {
         composerArray.unshift(composer);
         composer = composer._parent;
       }
+
+      return composerArray;
+
+    }
+
+    /**
+    * Reduces an array of composer queries to a single query information object
+    * @private
+    * @param {Array} [composerArray]
+    * @return {Object} Looks like {commands: [], joins: []}
+    */
+    __reduceToQueryInformation__(composerArray) {
 
       let joins = [];
 
@@ -179,9 +191,13 @@ module.exports = (function() {
 
         if (composerCommand.type === 'join') {
 
-          joins.push(Object.keys(composerCommand.data).reduce((p, c) => {
-            return (p[c] = composerCommand.data[c], p);
-          }, {}));
+          joins.push(
+            composerCommand.data.map(joinData => {
+              return Object.keys(joinData).reduce((p, c) => {
+                return (p[c] = joinData[c], p);
+              }, {});
+            })
+          );
 
         } else {
 
@@ -198,62 +214,34 @@ module.exports = (function() {
       return {
         commands: commands,
         joins: joins
-      };
+      }
 
     }
 
     /**
-    * Retrieve all joined column data for a given join
+    * Reduces an array of commands from query informtion to a SQL query
     * @private
-    * @param {string} joinName The name of the join relationship
+    * @param {Array} [commandArray]
+    * @param {Array} [includeColumns=*] Which columns to include, includes all by default
+    * @return {Object} Looks like {sql: [], params: []}
     */
-    __joinedColumns__(joinName) {
-      let joinsObject = this.Model.joinInformation(joinName);
-      return joinsObject.Model.columnNames().map(columnName => {
-        return {
-          name: joinName,
-          table: joinsObject.Model.table(),
-          columnName: columnName,
-          alias: `${(joinsObject.child && joinsObject.multiple) ? '$$' : '$'}${joinName}\$${columnName}`
-        };
-      });
-    }
+    __reduceCommandsToQuery__(commandArray, includeColumns) {
 
-    /**
-    * Generate a SQL query and its associated parameters from the current composer instance
-    * @private
-    * @return {Object} Has "params" and "sql" properties.
-    */
-    __generateQuery__() {
+      return commandArray.reduce((prev, command, i) => {
 
-      let queryInfo = this.__generateQueryInformation__();
-
-      return queryInfo.commands.concat({joins: queryInfo.joins}).reduce((prev, command, i) => {
-
-        let table = !prev.sql ? this.Model.table() : `t${i}`;
+        let table = `t${i}`;
 
         let multiFilter = this.db.adapter.createMultiFilter(table, command.where ? command.where.comparisons : []);
         let params = this.db.adapter.getParamsFromMultiFilter(multiFilter);
 
         let joins = null;
-        let columns = this.Model.columnNames();
+        let columns = includeColumns || this.Model.columnNames();
 
         let orderBy = command.orderBy ? [command.orderBy] : []
 
-        // Only add in joins at the end
-        if (command.joins) {
-
-          joins = command.joins;
-
-          joins.forEach(j => {
-            columns = columns.concat(this.__joinedColumns__(j.name));
-          });
-
-        }
-
         return {
           sql: this.db.adapter.generateSelectQuery(
-            prev.sql,
+            prev.sql || {table: this.Model.table()},
             table,
             columns,
             multiFilter,
@@ -267,7 +255,99 @@ module.exports = (function() {
 
       }, {sql: null, params: []});
 
+    }
+
+    /**
+    * Retrieve all joined column data for a given join
+    * @param {string} joinName The name of the join relationship
+    * @private
+    */
+    __joinedColumns__(joinName) {
+      let relationship = this.Model.relationships().find(joinName);
+      return relationship.getModel().columnNames().map(columnName => {
+        return {
+          name: joinName,
+          table: relationship.getModel().table(),
+          columnName: columnName,
+          alias: `${(relationship.multiple()) ? '$$' : '$'}${joinName}\$${columnName}`
+        };
+      });
+    }
+
+    /**
+    * Generate a SQL query and its associated parameters from the current composer instance
+    * @private
+    * @param {Array} [includeColumns=*] Which columns to include, includes all by default
+    * @param {boolean} [disableJoins=false] Disable joins if you just want a subset of data
+    * @return {Object} Has "params" and "sql" properties.
+    */
+    __generateQuery__(includeColumns, disableJoins) {
+
+      let queryInfo = this.__reduceToQueryInformation__(this.__collapse__());
+      let query = this.__reduceCommandsToQuery__(queryInfo.commands, includeColumns);
+
+      return disableJoins ? query : this.__addJoinsToQuery__(
+        query,
+        queryInfo,
+        includeColumns
+      );
+
     };
+
+    /**
+    * Add Joins to a query from queryInfo
+    * @param {Object} query Must be format {sql: '', params: []}
+    * @param {Object} queryInfo Must be format {commands: [], joins: []}
+    * @param {Array} [includeColumns=*] Which columns to include, includes all by default
+    * @return {Object} Has "params" and "sql" properties.
+    */
+    __addJoinsToQuery__(query, queryInfo, includeColumns) {
+
+      let columns = includeColumns || this.Model.columnNames();
+
+      queryInfo.joins.forEach(j => {
+        columns = columns.concat(this.__joinedColumns__(j[j.length - 1].joinAlias));
+      });
+
+
+      // Make sure we don't join in parts of the same dependency tree repeatedly
+      let joins = queryInfo.joins;
+
+      joins.sort((a, b) => a.length < b.length ? 1 : -1);
+
+      let joinAdded = {};
+      joins.forEach(join => {
+        for (let i = 0; i < join.length; i++) {
+          if (!joinAdded[join[i].joinAlias]) {
+            joinAdded[join[i].joinAlias] = join;
+            return;
+          }
+        }
+      });
+
+      joins = Object.keys(joinAdded).map(k => joinAdded[k]);
+
+      // Order by the orders... in reverse order
+      let orderBy = queryInfo.commands.reduce((arr, command) => {
+        command.orderBy && arr.unshift(command.orderBy);
+        return arr;
+      }, []);
+
+      return {
+        sql: this.db.adapter.generateSelectQuery(
+          query.sql,
+          'j',
+          columns,
+          null,
+          joins,
+          orderBy,
+          null,
+          query.params.length
+        ),
+        params: query.params
+      };
+
+    }
 
     /**
     * When using Composer#where, format all provided comparisons
@@ -284,26 +364,24 @@ module.exports = (function() {
         .map(comparison => {
 
           let column = comparison.split('__');
-          let rel = this.Model.joinInformation(column[0]);
+          let rel = this.Model.relationship(column[0]);
 
           let table = null;
-          let via = null;
-          let child = null;
           let joined = false;
+          let joins = null;
 
           if (rel) {
 
             let joinName = column.shift();
 
             // if it's not found, return null...
-            if (!rel.Model.hasColumn(column[0])) {
+            if (!rel.getModel().hasColumn(column[0])) {
               return null;
             }
 
-            table = rel.Model.table();
-            child = rel.child;
-            via = rel.via;
+            table = rel.getModel().table();
             joined = true;
+            joins = rel.joins('w');
 
           }
 
@@ -325,8 +403,7 @@ module.exports = (function() {
             comparator: comparator,
             value: comparisons[comparison],
             joined: joined,
-            via: via,
-            child: child
+            joins: joins
           };
 
         })
@@ -458,7 +535,8 @@ module.exports = (function() {
     */
     join(joinName) {
 
-      if (!this.Model.hasJoin(joinName)) {
+      let relationship = this.Model.relationships().find(joinName);
+      if (!relationship) {
         throw new Error(`Model ${this.Model.name} does not have relationship ${joinName}`);
       }
 
@@ -470,16 +548,12 @@ module.exports = (function() {
         composer = composer._parent;
       }
 
-      let joinsObject = this.Model.joinInformation(joinName);
+      let joinData = relationship.joins();
+      joinData[joinData.length - 1].joinAlias = joinName;
 
       this._command = {
         type: 'join',
-        data: {
-          name: joinName,
-          table: joinsObject.Model.table(),
-          field: joinsObject.child ? joinsObject.via : 'id',
-          baseField: joinsObject.child ? 'id' : joinsObject.via
-        }
+        data: joinData
       };
 
       return new Composer(this.Model, this);
@@ -500,6 +574,83 @@ module.exports = (function() {
         let models = this.__parseModelsFromRows__(rows);
 
         callback.call(this, err, models);
+
+      });
+
+    }
+
+    /**
+    * Shortcut for .limit(1).end(callback) that only returns a model object or error if not found
+    * @param {Function} callback Callback to execute, provides an error and model parameter
+    */
+    first(callback) {
+
+      return this.limit(1).end((err, models) => {
+
+        if (!err && !models.length) {
+          err = new Error(`No ${this.Model} found`);
+        }
+
+        callback(err, models[0]);
+
+      });
+
+    }
+
+    /**
+    * Execute query as an update query, changed all fields specified.
+    * @param {Object} fields The object containing columns (keys) and associated values you'd like to update
+    * @param {function({Error}, {Nodal.ModelArray})} callback The callback for the update query
+    */
+    update(fields, callback) {
+
+      let query = this.__generateQuery__(['id'], true);
+      let columns = Object.keys(fields);
+      let params = columns.map(c => fields[c]);
+
+      query.sql = this.db.adapter.generateUpdateAllQuery(
+        this.Model.table(),
+        'id',
+        columns,
+        query.params.length,
+        query.sql
+      );
+
+      query.params = query.params.concat(params);
+
+      return this.db.query(query.sql, query.params, (err, result) => {
+
+        let rows = result ? (result.rows || []).slice() : [];
+
+        if (err) {
+          let models = this.__parseModelsFromRows__(rows);
+          return callback.call(this, err, models);
+        }
+
+        let ids = result.rows.map(row => row.id);
+
+        /* Grab all items with ids, sorted by order */
+        /* Only need to grab joins and order */
+
+        let composerArray = this.__collapse__()
+          .filter(composer => composer._command)
+          .filter(composer => composer._command.type === 'orderBy' || composer._command.type === 'join');
+
+        // Add in id filter
+        composerArray.unshift(new Composer(this.Model).where({id__in: ids})._parent);
+
+        let queryInfo = this.__reduceToQueryInformation__(composerArray);
+        let query = this.__reduceCommandsToQuery__(queryInfo.commands);
+        query = this.__addJoinsToQuery__(query, queryInfo);
+
+        return this.db.query(query.sql, query.params, (err, result) => {
+
+          let rows = result ? (result.rows || []).slice() : [];
+          let models = this.__parseModelsFromRows__(rows);
+
+          callback.call(this, err, models);
+
+        });
 
       });
 

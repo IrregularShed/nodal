@@ -12,9 +12,9 @@ To begin your project, first install the latest version of Node (4.x) from
 terminal and run:
 
 ```
-sudo npm install nodal -g
+npm install nodal -g
 ```
-
+(If you get an error, run `sudo npm install nodal -g` or fix permissions permanently by <a href="https://docs.npmjs.com/getting-started/fixing-npm-permissions" target="_blank">following these directions</a>)
 It will take a few seconds to finish. At this point, you have the Nodal
 command line tools available and you can really get started!
 
@@ -277,7 +277,7 @@ module.exports = (function() {
 
 Our database is set from `./db/main.js` which grabs connection data from
 `./config/db.json`. (Explore both files to see what's happening. Same as
-`./config/secrets.json` above.) Not that Nodal currently only supports PostgreSQL.
+`./config/secrets.json` above.) Note that Nodal currently only supports PostgreSQL.
 
 Our schema is set from `Nodal.my.Schema` which automatically loaded `./db/schema.json`
 upon starting the server. (**For this reason, Schema changes require app shutdowns and reloads.**)

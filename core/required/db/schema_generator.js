@@ -125,6 +125,10 @@ module.exports = (function() {
         arrColumnData.push({name:'created_at', type: 'datetime'});
       }
 
+      if (columns.indexOf('updated_at') === -1) {
+        arrColumnData.push({name:'updated_at', type: 'datetime'});
+      }
+
       let defaults = this.db.adapter.typePropertyDefaults;
 
       arrColumnData.forEach((function(columnData) {
@@ -314,6 +318,40 @@ module.exports = (function() {
       this.indices = this.indices.filter(function(v) {
         return !(v.table === table && v.column === column);
       });
+
+      return true;
+
+    }
+
+    addForeignKey(table, referenceTable) {
+
+      let tableClass = inflect.classify(table);
+      let referenceTableClass = inflect.classify(referenceTable);
+
+      if (!this.models[tableClass]) {
+        throw new Error(`Model ${tableClass} does not exist.`);
+      }
+
+      if (!this.models[referenceTableClass]) {
+        throw new Error(`Model ${referenceTableClass} does not exist.`);
+      }
+
+      return true;
+
+    }
+
+    dropForeignKey(table, referenceTable) {
+
+      let tableClass = inflect.classify(table);
+      let referenceTableClass = inflect.classify(referenceTable);
+
+      if (!this.models[tableClass]) {
+        throw new Error(`Model ${tableClass} does not exist.`);
+      }
+
+      if (!this.models[referenceTableClass]) {
+        throw new Error(`Model ${referenceTableClass} does not exist.`);
+      }
 
       return true;
 
